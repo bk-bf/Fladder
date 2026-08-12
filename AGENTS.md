@@ -62,8 +62,13 @@ first one on a machine also downloads the mdk-sdk media backend.
 analyze output at all as a regression this merge introduced, not as pre-existing
 noise. It takes about 90 seconds.
 
-`flutter test` is a weak signal — the suite is 2 files. Passing tests are not
-evidence the merge is good.
+`flutter test` is a weak signal — there are 2 test files and only one of them is
+real. `test/pip_manager_test.dart` has 9 passing tests;
+`test/widget_test.dart` is the `flutter create` boilerplate, unchanged since the
+initial commit, which taps a counter this app has never had and has always
+failed. `verify` skips it by name, so **do not run bare `flutter test`** and
+conclude the merge broke something — that failure predates the fork. Anything
+upstream adds later is picked up automatically.
 
 If something makes the build impossible to run rather than failing it, say that
 plainly instead of reporting the merge as checked. A merge that was never
