@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# record <upstream-sha> <taken|skipped|deferred> <reason> [local-sha]
+#
+# The ledger is the only thing that makes cherry-pick triage survivable: when a
+# later pick conflicts, grep it for a skipped ancestor before resolving by hand.
+# Backfilling the skipped commit is usually correct and cheaper than hand-editing.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+SHA="${1:?}"; DECISION="${2:?}"; REASON="${3:?}"; LOCAL="${4:-}"
+
+case "$DECISION" in taken|skipped|deferred) ;; *) echo "bad decision: $DECISION" >&2; exit 1 ;; esac
+
+python3 - "$SHA" "$DECISION" "$REASON" "$LOCAL" <<'PY'
+import json, subprocess, sys
+sha, decision, reason, local = sys.argv[1:5]
+def g(fmt):
+    return subprocess.run(["git","log","-1","--format="+fmt,sha],
+                          capture_output=True,text=True).stdout.strip()
+with open(".fork/ledger.jsonl","a") as f:
+    f.write(json.dumps({"upstream":sha,"subject":g("%s"),"upstream_date":g("%aI"),
+                        "decision":decision,"reason":reason,
+                        "local":local or None})+"\n")
+PY
+echo "recorded $DECISION ${SHA:0:8}"

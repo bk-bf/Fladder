@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# List upstream commits still awaiting a decision, oldest first, as JSON lines.
+# The ledger is the source of truth: anything recorded taken/skipped is filtered
+# out, anything deferred reappears until it gets a real decision.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+git fetch -q upstream develop
+git branch -qf upstream-mirror upstream/develop
+
+python3 - <<'PY'
+import json, subprocess, re, os
+
+state = json.load(open(".fork/state.json"))
+fork_point = state["fork_point"]
+
+decided = set()
+if os.path.exists(".fork/ledger.jsonl"):
+    for line in open(".fork/ledger.jsonl"):
+        line = line.strip()
+        if not line:
+            continue
+        e = json.loads(line)
+        if e["decision"] in ("taken", "skipped"):
+            decided.add(e["upstream"])
+
+shas = subprocess.run(["git","rev-list","--reverse",f"{fork_point}..upstream/develop"],
+                      capture_output=True,text=True).stdout.split()
+
+owned = []
+for line in open(".fork/policy.md"):
+    line = line.strip()
+    if line.startswith("lib/") or line.startswith("assets/"):
+        owned.append(line.rstrip("*").rstrip("/"))
+
+for sha in shas:
+    if sha in decided:
+        continue
+    def g(fmt):
+        return subprocess.run(["git","log","-1","--format="+fmt,sha],
+                              capture_output=True,text=True).stdout.strip()
+    files = [f for f in subprocess.run(
+        ["git","show","--name-only","--format=","--diff-filter=d",sha],
+        capture_output=True,text=True).stdout.split() if f]
+    subject = g("%s")
+    real = [f for f in files if not re.search(r"\.(g|freezed)\.dart$", f)]
+
+    translation_only = bool(files) and all(f.startswith("lib/l10n/") for f in files)
+    is_weblate = bool(re.search(r"Translated using Weblate|Updated translations", subject))
+    touches_owned = any(f.startswith(p) for f in real for p in owned) if owned else False
+
+    hint = "defer" if touches_owned else ("auto-take" if (translation_only or is_weblate) else "judge")
+
+    print(json.dumps({
+        "sha": sha, "subject": subject, "author": g("%an"), "date": g("%ad"),
+        "files": real[:40], "file_count": len(real),
+        "generated_touched": len(files) - len(real),
+        "hint": hint,
+    }))
+PY

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Cherry-pick one upstream commit onto `kirill`, regenerating codegen instead of
+# merging it. Preserves original authorship (GPL attribution) and records the
+# upstream sha as a trailer.
+#
+# exit 0  picked and verified
+# exit 2  conflict in a non-generated file — left staged for the agent to resolve
+# exit 3  verification failed after a clean pick — working tree left dirty
+set -uo pipefail
+SHA="${1:?usage: take <upstream-sha>}"
+cd "$(git rev-parse --show-toplevel)"
+export PATH="$HOME/opt/flutter/bin:$PATH"
+
+GEN_RE='\.(g|freezed)\.dart$'
+
+if ! git cherry-pick -n -x "$SHA" >/dev/null 2>&1; then
+  mapfile -t UNMERGED < <(git diff --name-only --diff-filter=U)
+  mapfile -t REAL < <(printf '%s\n' "${UNMERGED[@]:-}" | grep -Ev "$GEN_RE" | grep -v '^$')
+  if ((${#REAL[@]})); then
+    echo "CONFLICT"
+    printf '%s\n' "${REAL[@]}"
+    exit 2
+  fi
+  # only generated files conflicted — they get regenerated, so resolution is moot
+  printf '%s\n' "${UNMERGED[@]}" | grep -v '^$' | xargs -r git checkout --ours -- 2>/dev/null
+  printf '%s\n' "${UNMERGED[@]}" | grep -v '^$' | xargs -r git add
+fi
+
+# never carry upstream's generated output; restore ours and rebuild it
+mapfile -t GEN < <(git diff --cached --name-only | grep -E "$GEN_RE")
+((${#GEN[@]})) && git checkout HEAD -- "${GEN[@]}" 2>/dev/null
+
+# regenerate only when a codegen input actually moved
+if git diff --cached --name-only | grep -qE '^(lib/.*\.dart|swagger/.*\.json|pubspec\.yaml|build\.yaml)$'; then
+  flutter pub get >/dev/null 2>&1 || { echo "PUB_GET_FAILED"; exit 3; }
+  if ! dart run build_runner build --delete-conflicting-outputs >/tmp/fork-codegen.log 2>&1; then
+    echo "CODEGEN_FAILED (see /tmp/fork-codegen.log)"; exit 3
+  fi
+fi
+
+if ! flutter analyze --no-fatal-infos >/tmp/fork-analyze.log 2>&1; then
+  echo "ANALYZE_FAILED (see /tmp/fork-analyze.log)"; exit 3
+fi
+if ! flutter test >/tmp/fork-test.log 2>&1; then
+  echo "TEST_FAILED (see /tmp/fork-test.log)"; exit 3
+fi
+
+git add -A
+MSG=$(git log -1 --format=%B "$SHA")
+AUTHOR=$(git log -1 --format='%an <%ae>' "$SHA")
+printf '%s\n\nUpstream-Commit: %s\n' "$MSG" "$SHA" \
+  | git commit --author="$AUTHOR" -F - >/dev/null || { echo "COMMIT_FAILED"; exit 3; }
+
+echo "OK $(git rev-parse --short HEAD)"
