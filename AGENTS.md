@@ -54,36 +54,55 @@ disable it, and do not resolve a conflict in a way you would not want repeated.
 Where the two sides genuinely disagree about behaviour, keep this fork's
 behaviour. That is what the fork is for.
 
-## Generated files are never merged
+## Generated files
 
-95 files matching `*.g.dart` and `*.freezed.dart` are build artifacts that
-upstream commits. They conflict on almost every merge and the conflict carries
-no information. Never resolve one by hand and never take one side.
+Upstream **commits** its codegen output — about 95 files matching `*.g.dart` and
+`*.freezed.dart`, plus `lib/routes/auto_router.gr.dart`. They are not ignored
+and not regenerated on checkout. Codegen comes from freezed, riverpod_generator,
+chopper, auto_route and swagger_dart_code_generator; `build.yaml` lists the
+inputs.
 
-Take ours, then rebuild them:
+**Do not regenerate as part of an upstream merge.** Running `build_runner` here
+does not reproduce upstream's committed output byte for byte — the generators
+resolved by a fresh `pub get` are newer than the ones upstream last ran, so the
+output comes back reordered and rewrapped. Regenerating on every merge would
+commit that churn, and the fork would then conflict with upstream on files
+neither side meaningfully changed.
+
+So treat generated files as ordinary files:
+
+- On conflict, take **upstream's** version. It matches upstream's source, which
+  is what the rest of the merge is bringing in.
+- Regenerate only if the build actually fails because the output is stale, and
+  then commit only the files that had to change.
+- `pubspec.lock`: take upstream's, then `flutter pub get`.
+
+Generating output for **our own** changes is different — that divergence is
+deliberate, and the regenerated files get committed with the change that needed
+them. That belongs on `dev`, not in a merge commit.
+
+### Never stage while a build is running
+
+`build_runner --delete-conflicting-outputs` removes the committed generated
+files before writing them back. A `git add -A` in that window records ~112
+deletions that nobody intended, and the commit looks ordinary — it is only
+visible as a five-figure deletion count in `git show --stat`. This has already
+happened once here. Check nothing is generating before staging:
 
 ```sh
-flutter pub get
-dart run build_runner build --delete-conflicting-outputs
+pgrep -af build_runner
 ```
-
-`pubspec.lock` is the same — regenerate it with `flutter pub get` rather than
-merging it. Codegen comes from freezed, riverpod_generator, chopper,
-auto_route and swagger_dart_code_generator; `build.yaml` lists the inputs.
-
-Regeneration is only needed when a codegen input actually moved — anything under
-`lib/**.dart`, `swagger/*.json`, `pubspec.yaml` or `build.yaml`. A
-translations-only merge does not need it.
 
 ## Checking the result
 
 ```sh
-.fork/bin/verify --regen --build   # what a merge should pass before it is pushed
-.fork/bin/verify                   # analyze + test only, while iterating
+.fork/bin/verify --build   # what a merge should pass before it is pushed
+.fork/bin/verify           # analyze + test only, while iterating
+.fork/bin/verify --regen --build   # only when stale codegen is the actual problem
 ```
 
-`--regen` rebuilds the generated files and is needed whenever a codegen input
-moved. `--build` compiles the Linux app.
+`--build` compiles the Linux app. `--regen` rebuilds the generated files first
+and is **not** part of a normal merge — see "Generated files" above for why.
 
 The toolchain is pinned by `.fvmrc` to Flutter 3.35.7 and lives at
 `~/opt/flutter/bin` on this host — it is not on `PATH` by default.
