@@ -1,8 +1,0 @@
-{
-  "upstream": "Fladder-App/Fladder",
-  "upstream_branch": "develop",
-  "line": "kirill",
-  "fork_point": "3cc44ac377a24576488cbf7d01265ecf220bb5b9",
-  "fork_point_date": "2026-08-09",
-  "flutter": "3.35.7"
-}

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Is our line behind upstream?
+#
+# Exit non-zero when there is something to merge. The output is the answer's
+# identity — mon hashes it to decide whether this is news, so it must name the
+# upstream tip and nothing that drifts on its own. No dates, no counters that
+# move while upstream is still, or a merge that failed would be retried every
+# hour instead of once per upstream change.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+ONTO="${1:-upstream/develop}"
+MINE="${2:-kirill}"
+
+if ! git fetch -q "${ONTO%%/*}" "${ONTO#*/}" 2>/tmp/fork-fetch.err; then
+  # A fork nobody can ask about must not read as one that is up to date.
+  echo "upstream unreachable: $(tr -d '\n' </tmp/fork-fetch.err | tail -c 200)"
+  exit 1
+fi
+
+TIP=$(git rev-parse "$ONTO")
+BEHIND=$(git rev-list --count "$MINE..$ONTO")
+
+if [[ "$BEHIND" == "0" ]]; then
+  echo "level with $ONTO at ${TIP:0:8}"
+  exit 0
+fi
+
+echo "$BEHIND commit(s) behind $ONTO, whose tip is $TIP"
+exit 1

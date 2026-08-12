@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Regenerate codegen if needed, then analyze and test.
+# Baseline on the fork point is "No issues found!", so any analyze output is a
+# real regression, not pre-existing noise.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+export PATH="$HOME/opt/flutter/bin:$PATH"
+
+if [[ "${1:-}" == "--regen" ]]; then
+  flutter pub get >/dev/null 2>&1 || { echo "PUB_GET_FAILED"; exit 3; }
+  if ! dart run build_runner build --delete-conflicting-outputs >/tmp/fork-codegen.log 2>&1; then
+    echo "CODEGEN_FAILED (see /tmp/fork-codegen.log)"; exit 3
+  fi
+fi
+
+if ! flutter analyze --no-fatal-infos >/tmp/fork-analyze.log 2>&1; then
+  echo "ANALYZE_FAILED"; tail -20 /tmp/fork-analyze.log; exit 3
+fi
+if ! flutter test >/tmp/fork-test.log 2>&1; then
+  echo "TEST_FAILED"; tail -20 /tmp/fork-test.log; exit 3
+fi
+echo "VERIFIED"
