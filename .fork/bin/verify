@@ -1,15 +1,27 @@
 #!/usr/bin/env bash
-# Regenerate codegen if needed, then analyze and test.
-# Baseline on the fork point is "No issues found!", so any analyze output is a
-# real regression, not pre-existing noise.
+# verify [--regen] [--build]
+#
+#   --regen  rebuild the generated files first (needed whenever a codegen input
+#            moved: lib/**.dart, swagger/*.json, pubspec.yaml, build.yaml)
+#   --build  compile the Linux app as well — slower, and the only check that
+#            proves the merge actually builds
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 export PATH="$HOME/opt/flutter/bin:$PATH"
 
-if [[ "${1:-}" == "--regen" ]]; then
+REGEN=0; BUILD=0
+for arg in "$@"; do
+  case "$arg" in
+    --regen) REGEN=1 ;;
+    --build) BUILD=1 ;;
+    *) echo "unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
+
+if ((REGEN)); then
   flutter pub get >/dev/null 2>&1 || { echo "PUB_GET_FAILED"; exit 3; }
   if ! dart run build_runner build --delete-conflicting-outputs >/tmp/fork-codegen.log 2>&1; then
-    echo "CODEGEN_FAILED (see /tmp/fork-codegen.log)"; exit 3
+    echo "CODEGEN_FAILED"; tail -20 /tmp/fork-codegen.log; exit 3
   fi
 fi
 
@@ -19,4 +31,13 @@ fi
 if ! flutter test >/tmp/fork-test.log 2>&1; then
   echo "TEST_FAILED"; tail -20 /tmp/fork-test.log; exit 3
 fi
-echo "VERIFIED"
+
+if ((BUILD)); then
+  if ! flutter build linux --release >/tmp/fork-build.log 2>&1; then
+    echo "BUILD_FAILED"; tail -25 /tmp/fork-build.log; exit 3
+  fi
+  echo "VERIFIED (analyze, test, linux build)"
+  exit 0
+fi
+
+echo "VERIFIED (analyze, test)"

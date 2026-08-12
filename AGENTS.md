@@ -43,12 +43,20 @@ translations-only merge does not need it.
 ## Checking the result
 
 ```sh
-.fork/bin/verify           # analyze + test
-.fork/bin/verify --regen   # regenerate codegen first, then analyze + test
+.fork/bin/verify --regen --build   # what a merge should pass before it is pushed
+.fork/bin/verify                   # analyze + test only, while iterating
 ```
+
+`--regen` rebuilds the generated files and is needed whenever a codegen input
+moved. `--build` compiles the Linux app.
 
 The toolchain is pinned by `.fvmrc` to Flutter 3.35.7 and lives at
 `~/opt/flutter/bin` on this host — it is not on `PATH` by default.
+
+**Never push a merge that has not passed `--build`.** Compiling is the only
+check that proves the result works; analyze and test between them do not.
+Budget for it — a clean release build takes upwards of fifteen minutes, and the
+first one on a machine also downloads the mdk-sdk media backend.
 
 `flutter analyze` on the fork point reports **No issues found**, so treat any
 analyze output at all as a regression this merge introduced, not as pre-existing
@@ -57,11 +65,9 @@ noise. It takes about 90 seconds.
 `flutter test` is a weak signal — the suite is 2 files. Passing tests are not
 evidence the merge is good.
 
-`flutter build linux` is the real check and currently **cannot run on this host**:
-it needs `clang`, `cmake`, `ninja-build` and `libmpv-dev`, which are not
-installed and need root. Until they are, a clean analyze is the strongest local
-evidence available, and the fork's GitHub Actions build is the backstop. Say so
-rather than implying the build was verified.
+If something makes the build impossible to run rather than failing it, say that
+plainly instead of reporting the merge as checked. A merge that was never
+compiled and one that compiled cleanly must not read the same way.
 
 ## Translations
 
